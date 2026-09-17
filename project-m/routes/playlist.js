@@ -149,12 +149,17 @@ router.post('/save-playlist', (req, res) => {
 
   const newPlaylist = req.body;
 
+  if (!newPlaylist.id) {
+    newPlaylist.id = Date.now().toString();
+  }
+
   playlists.push(newPlaylist);
 
-  console.log(playlists);
+  console.log('저장된 플레이리스트:', playlists);
 
   res.json({
     message: '플레이리스트 저장 완료!',
+    playlist: newPlaylist,
     playlists: playlists
   });
 
@@ -170,9 +175,19 @@ router.get('/playlists', (req, res) => {
 });
 
 // 삭제
-router.delete('/playlist/:index', (req, res) => {
+router.delete('/playlist/:id', (req, res) => {
 
-  const index = req.params.index;
+  const id = req.params.id;
+
+  const index = playlists.findIndex(
+    playlist => playlist.id === id
+  );
+
+  if (index === -1) {
+    return res.status(404).json({
+      message: '해당 플레이리스트가 존재하지 않습니다.'
+    });
+  }
 
   playlists.splice(index, 1);
 
@@ -184,21 +199,30 @@ router.delete('/playlist/:index', (req, res) => {
 });
 
 // 수정
-router.put('/playlist/:index', (req, res) => {
+router.put('/playlist/:id', (req, res) => {
 
-  const index = req.params.index;
+  const id = req.params.id;
   const updatedData = req.body;
 
-  if (!playlists[index]) {
+  const index = playlists.findIndex(
+    playlist => playlist.id === id
+  );
+
+  if (index === -1) {
     return res.status(404).json({
       message: '해당 플레이리스트가 존재하지 않습니다.'
     });
   }
 
-  playlists[index] = updatedData;
+  // 기존 ID는 유지하면서 수정된 내용 반영
+  playlists[index] = {
+    ...updatedData,
+    id: id
+  };
 
   res.json({
     message: '플레이리스트 수정 완료!',
+    playlist: playlists[index],
     playlists: playlists
   });
 
