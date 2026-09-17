@@ -4,6 +4,7 @@ console.log("내가 수정한 app.js 로드됨");
 const API_CONFIG = {
   useMockData: false,
   searchUrl: 'http://localhost:3000/playlist',
+  mockUrl: './data/playlists.json',
 };
 
 const fallbackData = {
@@ -36,6 +37,8 @@ const state = {
   selectedTrackId: null,
   selectedTrackIds: [],
   savedPlaylists: [],
+  renameMode: false,
+  editingPlaylistId: null,
 };
 
 const elements = {
@@ -56,6 +59,12 @@ const elements = {
   mainSaveButton: document.querySelector('#mainSaveButton'),
   savePlaylistButton: document.querySelector('#savePlaylistButton'),
   savedPlaylistsContainer: document.querySelector('#savedPlaylistsContainer'),
+  renameModeButton: document.querySelector('#renameModeButton'),
+  playlistEditor: document.querySelector('#playlistEditor'),
+  editorTitle: document.querySelector('#editorTitle'),
+  editorTrackList: document.querySelector('#editorTrackList'),
+  editorAddButton: document.querySelector('#editorAddButton'),
+  editorCloseButton: document.querySelector('#editorCloseButton'),
   playlistToggle: document.querySelector('#playlistToggle'),
   playlistDrawer: document.querySelector('#playlistDrawer'),
   closeDrawer: document.querySelector('#closeDrawer'),
@@ -77,6 +86,20 @@ const elements = {
   expandedPlaylistsList: document.querySelector('#expandedPlaylistsList'),
   sideTabButtons: document.querySelectorAll('.side-tab-button'),
 };
+
+const trackCache = new Map();
+
+function cacheTracks(playlists) {
+  playlists.forEach((playlist) => playlist.tracks.forEach((track) => trackCache.set(track.id, track)));
+}
+
+function getTrackById(id) {
+  return trackCache.get(id);
+}
+
+function getTracksByIds(ids) {
+  return ids.map(getTrackById).filter(Boolean);
+}
 
 function getUniqueTracks(tracks) {
   return tracks.filter((track, index, self) =>
@@ -133,9 +156,15 @@ async function loadData() {
     const data = await fetchPlaylistData();
     state.playlists = Array.isArray(data.playlists) ? data.playlists : [];
   } catch (error) {
-    console.warn(error.message);
-    state.playlists = fallbackData.playlists;
+    console.warn(error.message, '→ 목 데이터로 대체합니다.');
+    try {
+      const mock = await fetch(API_CONFIG.mockUrl).then((r) => r.json());
+      state.playlists = mock.playlists;
+    } catch {
+      state.playlists = fallbackData.playlists;
+    }
   }
+  cacheTracks(state.playlists);
   applyMood(state.activeMood);
 }
 
@@ -207,7 +236,7 @@ function render() {
 }
 
 function renderSelectedPlaylist() {
-  const selectedTracks = state.playlists.flatMap(p => p.tracks).filter(t => state.selectedTrackIds.includes(t.id));
+  const selectedTracks = getTracksByIds(state.selectedTrackIds);
   const uniqueSelected = getUniqueTracks(selectedTracks);
 
   if (uniqueSelected.length === 0) {
@@ -268,49 +297,361 @@ elements.playSelectedButton.addEventListener('click', () => {
   elements.playlistDrawer.classList.add('active');
 });
 
-const handleSavePlaylist = () => {
+const handleSavePlaylist = async () => {
   if (state.selectedTrackIds.length === 0) return;
 
-  const name = prompt('리스트 이름을 입력하세요:', `내 리스트 ${state.savedPlaylists.length + 1}`);
+  const name = prompt(
+    '리스트 이름을 입력하세요:',
+    `내 리스트 ${state.savedPlaylists.length + 1}`
+  );
+
   if (!name) return;
 
-  const newPlaylist = {
-    id: Date.now().toString(),
-    name: name,
-    trackIds: [...state.selectedTrackIds]
-  };
+const selectedTracks = state.selectedTrackIds
+  .map(id => trackCache.get(id))
+  .filter(Boolean);
 
-  state.savedPlaylists.push(newPlaylist);
-  renderSavedPlaylists();
-  alert('리스트가 저장되었습니다.');
+const newPlaylist = {
+  id: Date.now().toString(),
+  name: name,
+  trackIds: [...state.selectedTrackIds],
+  tracks: selectedTracks
 };
+
+  try {
+    const response = await fetch('http://localhost:3000/save-playlist', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(newPlaylist)
+    });
+
+    if (!response.ok) {
+      throw new Error('플레이리스트 저장 실패');
+    }
+
+    const data = await response.json();
+
+    state.savedPlaylists = data.playlists;
+
+    renderSavedPlaylists();
+    renderExpandedPlaylists();
+
+    alert('리스트가 저장되었습니다.');
+
+  } catch (error) {
+    console.error('플레이리스트 저장 오류:', error);
+    alert('리스트 저장 중 오류가 발생했습니다.');
+  }
+};
+
+async function loadSavedPlaylists() {
+  try {
+    const response = await fetch('http://localhost:3000/playlists');
+
+    if (!response.ok) {
+      throw new Error('저장된 플레이리스트 불러오기 실패');
+    }
+
+    const data = await response.json();
+
+    state.savedPlaylists = data.playlists || [];
+
+    // 저장된 플레이리스트의 곡 정보를 trackCache에 복원
+state.savedPlaylists.forEach(playlist => {
+  if (!playlist.tracks) return;
+
+  playlist.tracks.forEach(track => {
+    trackCache.set(track.id, track);
+  });
+});
+
+    renderSavedPlaylists();
+    renderExpandedPlaylists();
+
+    console.log('저장된 플레이리스트 불러오기 완료:', state.savedPlaylists);
+
+  } catch (error) {
+    console.error('플레이리스트 불러오기 오류:', error);
+  }
+}
+
+async function updatePlaylist(playlist) {
+  try {
+    const response = await fetch(
+      `http://localhost:3000/playlist/${playlist.id}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(playlist)
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('플레이리스트 수정 실패');
+    }
+
+    const data = await response.json();
+
+    state.savedPlaylists = data.playlists;
+
+    return true;
+
+  } catch (error) {
+    console.error('플레이리스트 수정 오류:', error);
+    alert('리스트 수정 중 오류가 발생했습니다.');
+
+    return false;
+  }
+}
 
 elements.savePlaylistButton.addEventListener('click', handleSavePlaylist);
 if (elements.mainSaveButton) {
   elements.mainSaveButton.addEventListener('click', handleSavePlaylist);
 }
 
-function renderSavedPlaylists() {
-  elements.savedPlaylistsContainer.innerHTML = state.savedPlaylists.map(playlist => `
-    <button class="saved-playlist-item" type="button" data-playlist-id="${playlist.id}">
-      <span class="item-text">${escapeHtml(playlist.name)} (${playlist.trackIds.length})</span>
-    </button>
-  `).join('');
+const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M14.5 5.5l4 4"/></svg>';
+const ICON_DELETE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>';
 
-  document.querySelectorAll('.saved-playlist-item').forEach(button => {
-    button.addEventListener('click', () => {
-      const playlist = state.savedPlaylists.find(p => p.id === button.dataset.playlistId);
-      if (playlist) loadSavedPlaylist(playlist);
-    });
+function renderSavedPlaylists() {
+  elements.savedPlaylistsContainer.innerHTML = state.savedPlaylists.map(playlist => {
+    const name = escapeHtml(playlist.name);
+
+    if (state.renameMode) {
+      return `
+        <div class="saved-playlist-row is-renaming" data-playlist-id="${playlist.id}">
+          <input class="saved-playlist-name-input" type="text" value="${name}" aria-label="리스트 이름 수정" />
+          <div class="saved-playlist-actions is-static">
+            <button class="saved-playlist-action" type="button" data-action="delete" title="삭제" aria-label="${name} 삭제">${ICON_DELETE}</button>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="saved-playlist-row" data-playlist-id="${playlist.id}">
+        <button class="saved-playlist-item" type="button">
+          <span class="item-text">${name}</span>
+        </button>
+        <span class="saved-playlist-count">${playlist.trackIds.length}</span>
+        <div class="saved-playlist-actions">
+          <button class="saved-playlist-action" type="button" data-action="edit" title="곡 편집" aria-label="${name} 곡 편집">${ICON_EDIT}</button>
+          <button class="saved-playlist-action" type="button" data-action="delete" title="삭제" aria-label="${name} 삭제">${ICON_DELETE}</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  elements.savedPlaylistsContainer.querySelectorAll('.saved-playlist-row').forEach(row => {
+    const findPlaylist = () => state.savedPlaylists.find(p => p.id === row.dataset.playlistId);
+
+    const nameInput = row.querySelector('.saved-playlist-name-input');
+    if (nameInput) {
+      // change는 blur/Enter 양쪽에서 뜬다. 포커스가 날아가지 않게 사이드바는 다시 그리지 않는다.
+      nameInput.addEventListener('change', async () => {
+  const playlist = findPlaylist();
+  if (!playlist) return;
+
+  const value = nameInput.value.trim();
+
+  if (!value) {
+    nameInput.value = playlist.name;
+    return;
+  }
+
+  const oldName = playlist.name;
+
+  playlist.name = value;
+
+  const success = await updatePlaylist(playlist);
+
+  if (!success) {
+    playlist.name = oldName;
+    nameInput.value = oldName;
+    return;
+  }
+
+  if (state.editingPlaylistId === playlist.id) {
+    elements.editorTitle.textContent = value;
+  }
+
+  renderExpandedPlaylists();
+});
+
+      nameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') nameInput.blur();
+      });
+    }
+
+    const openButton = row.querySelector('.saved-playlist-item');
+    if (openButton) {
+      openButton.addEventListener('click', () => {
+        const playlist = findPlaylist();
+        if (playlist) loadSavedPlaylist(playlist);
+      });
+    }
+
+    const editButton = row.querySelector('[data-action="edit"]');
+    if (editButton) {
+      editButton.addEventListener('click', () => {
+        const playlist = findPlaylist();
+        if (playlist) openPlaylistEditor(playlist.id);
+      });
+    }
+
+    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+  const playlist = findPlaylist();
+
+  if (!playlist) return;
+
+  if (!confirm(`"${playlist.name}" 리스트를 삭제할까요?`)) return;
+
+  try {
+    const response = await fetch(
+      `http://localhost:3000/playlist/${playlist.id}`,
+      {
+        method: 'DELETE'
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('플레이리스트 삭제 실패');
+    }
+
+    const data = await response.json();
+
+    state.savedPlaylists = data.playlists;
+
+    if (state.editingPlaylistId === playlist.id) {
+      closePlaylistEditor();
+    }
+
+    refreshSavedPlaylistViews();
+
+    alert('리스트가 삭제되었습니다.');
+
+  } catch (error) {
+    console.error('플레이리스트 삭제 오류:', error);
+    alert('리스트 삭제 중 오류가 발생했습니다.');
+  }
+});
   });
+}
+
+elements.renameModeButton.addEventListener('click', () => {
+  state.renameMode = !state.renameMode;
+  elements.renameModeButton.setAttribute('aria-pressed', String(state.renameMode));
+  elements.renameModeButton.classList.toggle('active', state.renameMode);
+  elements.renameModeButton.title = state.renameMode ? '이름 수정 완료' : '이름 수정';
+
+  renderSavedPlaylists();
+
+  const firstInput = elements.savedPlaylistsContainer.querySelector('.saved-playlist-name-input');
+  if (firstInput) firstInput.focus();
+});
+
+function openPlaylistEditor(playlistId) {
+  state.editingPlaylistId = playlistId;
+  renderPlaylistEditor();
+  elements.playlistEditor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closePlaylistEditor() {
+  state.editingPlaylistId = null;
+  elements.playlistEditor.hidden = true;
+}
+
+function renderPlaylistEditor() {
+  const playlist = state.savedPlaylists.find(p => p.id === state.editingPlaylistId);
+  if (!playlist) {
+    closePlaylistEditor();
+    return;
+  }
+
+  elements.playlistEditor.hidden = false;
+  elements.editorTitle.textContent = playlist.name;
+
+  const tracks = getTracksByIds(playlist.trackIds);
+
+  elements.editorTrackList.innerHTML = tracks.length === 0
+    ? '<div class="empty-state">이 리스트에 곡이 없습니다. 아래 목록에서 곡을 선택한 뒤 [선택한 곡 추가]를 누르세요.</div>'
+    : tracks.map(track => `
+      <div class="editor-track" data-track-id="${escapeHtml(track.id)}">
+        <img src="${track.thumbnail}" alt="" />
+        <div class="editor-track-copy">
+          <strong>${escapeHtml(track.title)}</strong>
+          <span>${escapeHtml(track.artist || track.channelTitle)}</span>
+        </div>
+        <button class="saved-playlist-action" type="button" data-action="remove" title="이 곡 빼기" aria-label="${escapeHtml(track.title)} 빼기">${ICON_DELETE}</button>
+      </div>
+    `).join('');
+
+  elements.editorTrackList.querySelectorAll('[data-action="remove"]').forEach(button => {
+  button.addEventListener('click', async () => {
+    const trackId = button.closest('.editor-track').dataset.trackId;
+
+    const oldTrackIds = [...playlist.trackIds];
+
+    playlist.trackIds = playlist.trackIds.filter(id => id !== trackId);
+
+    const success = await updatePlaylist(playlist);
+
+    if (!success) {
+      playlist.trackIds = oldTrackIds;
+      return;
+    }
+
+    refreshSavedPlaylistViews();
+  });
+});
+}
+
+elements.editorAddButton.addEventListener('click', async () => {
+  const playlist = state.savedPlaylists.find(
+    p => p.id === state.editingPlaylistId
+  );
+
+  if (!playlist) return;
+
+  const newIds = state.selectedTrackIds.filter(
+    id => !playlist.trackIds.includes(id)
+  );
+
+  if (newIds.length === 0) {
+    alert('아래 목록에서 추가할 곡을 먼저 선택하세요.');
+    return;
+  }
+
+  const oldTrackIds = [...playlist.trackIds];
+
+  playlist.trackIds.push(...newIds);
+
+  const success = await updatePlaylist(playlist);
+
+  if (!success) {
+    playlist.trackIds = oldTrackIds;
+    return;
+  }
+
+  refreshSavedPlaylistViews();
+});
+
+elements.editorCloseButton.addEventListener('click', closePlaylistEditor);
+
+function refreshSavedPlaylistViews() {
+  renderSavedPlaylists();
+  if (elements.expandedPlaylistsList) renderExpandedPlaylists();
+  if (state.editingPlaylistId) renderPlaylistEditor();
 }
 
 function loadSavedPlaylist(playlist) {
   state.selectedTrackIds = [...playlist.trackIds];
   state.activeMood = playlist.name;
 
-  const allTracks = state.playlists.flatMap(p => p.tracks);
-  const filteredTracks = allTracks.filter(t => state.selectedTrackIds.includes(t.id));
+  const filteredTracks = getTracksByIds(state.selectedTrackIds);
 
   state.activeTracks = getUniqueTracks(filteredTracks);
   elements.playlistTitle.textContent = playlist.name;
@@ -408,8 +749,7 @@ function renderExpandedPlaylists() {
       const playlist = state.savedPlaylists.find(p => p.id === playlistId);
       if (playlist) {
         const firstTrackId = playlist.trackIds[0];
-        const allTracks = state.playlists.flatMap(p => p.tracks);
-        const track = allTracks.find(t => t.id === firstTrackId);
+        const track = getTrackById(firstTrackId);
         if (track) {
           state.selectedTrackIds = [...playlist.trackIds];
           state.selectedTrackId = track.id;
@@ -555,3 +895,4 @@ elements.chips.forEach((chip) => {
 elements.reloadButton.addEventListener('click', loadData);
 
 loadData();
+loadSavedPlaylists();
