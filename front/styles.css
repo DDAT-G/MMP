@@ -161,6 +161,9 @@ button {
 
 .app-shell.collapsed .nav-section-title,
 .app-shell.collapsed .item-text,
+.app-shell.collapsed .saved-playlist-actions,
+.app-shell.collapsed .nav-section-action,
+.app-shell.collapsed .saved-playlist-count,
 .app-shell.collapsed .mini-panel {
   opacity: 0;
   pointer-events: none;
@@ -982,8 +985,51 @@ button {
   margin: 16px 0;
 }
 
+.nav-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-right: 8px;
+}
+
+.nav-section-action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.nav-section-action svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nav-section-action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+}
+
+.nav-section-action.active {
+  background: rgba(110, 168, 255, 0.18);
+  color: #8fbcff;
+}
+
 .nav-section-title {
-  padding: 0 14px 10px;
+  padding: 0 0 10px 14px;
   font-size: 0.75rem;
   font-weight: 800;
   color: var(--muted);
@@ -997,9 +1043,23 @@ button {
   gap: 4px;
 }
 
+.saved-playlist-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.saved-playlist-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
 .saved-playlist-item {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 10px 14px;
+  padding-right: 66px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -1011,12 +1071,182 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: all 0.2s;
+  transition: color 0.2s;
 }
 
-.saved-playlist-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+.saved-playlist-row:hover .saved-playlist-item {
   color: var(--text);
+}
+
+.saved-playlist-count {
+  position: absolute;
+  right: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.saved-playlist-row:hover .saved-playlist-count,
+.saved-playlist-row:focus-within .saved-playlist-count {
+  opacity: 0;
+}
+
+.saved-playlist-actions {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.saved-playlist-row.is-renaming {
+  padding: 4px 6px 4px 8px;
+  gap: 6px;
+}
+
+.saved-playlist-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.saved-playlist-name-input:focus {
+  outline: none;
+  border-color: rgba(110, 168, 255, 0.6);
+}
+
+.saved-playlist-actions.is-static {
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.saved-playlist-row:hover .saved-playlist-actions,
+.saved-playlist-row:focus-within .saved-playlist-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.saved-playlist-action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.saved-playlist-action svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.saved-playlist-action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+}
+
+.saved-playlist-action[data-action="delete"]:hover {
+  background: rgba(255, 89, 89, 0.16);
+  color: #ff7a7a;
+}
+
+.playlist-editor {
+  margin-bottom: 28px;
+  padding: 22px;
+  border: 1px solid #25d366;
+  border-radius: 16px;
+  background: #0d0f12;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.editor-header h2 {
+  margin: 4px 0 0;
+  font-size: 1.35rem;
+}
+
+.editor-track-list {
+  display: grid;
+  gap: 8px;
+}
+
+.editor-track {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(110, 168, 255, 0.06);
+}
+
+.editor-track img {
+  width: 64px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.editor-track-copy {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-track-copy strong,
+.editor-track-copy span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.editor-track-copy strong {
+  font-size: 0.95rem;
+}
+
+.editor-track-copy span {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.editor-track .saved-playlist-action {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.editor-track .saved-playlist-action:hover {
+  opacity: 1;
 }
 
 .drawer-actions {
@@ -1296,3 +1526,496 @@ button {
 
 
 
+
+
+/* ── MMP mini player: 영상은 보이게 유지하고, 동일 iframe을 확대/축소 ── */
+.expanded-player.mini {
+  top: auto;
+  right: auto;
+  left: 22px;
+  bottom: 104px; /* 고정 하단 재생바(90px) 바로 위 */
+  width: 480px;
+  height: 310px;
+  max-width: calc(100vw - 44px);
+  background: #090b0e;
+  border: 1px solid rgba(255, 255, 255, 0.19);
+  border-radius: 12px;
+  box-shadow: 0 14px 45px rgba(0, 0, 0, .65);
+  overflow: hidden;
+  z-index: 1250;
+  transition: none; /* iframe을 재생성하거나 DOM에서 이동하지 않음 */
+}
+
+.expanded-player.mini .expanded-header {
+  flex: 0 0 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+  position: relative;
+  border-bottom: 1px solid var(--line);
+}
+
+.expanded-player.mini .expanded-now-playing {
+  max-width: calc(100% - 138px);
+  overflow: hidden;
+}
+
+.expanded-player.mini .expanded-now-playing strong {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: .78rem;
+}
+
+.expanded-player.mini .expanded-now-playing span {
+  display: none;
+}
+
+.expanded-player.mini .expanded-body {
+  display: block;
+  flex: 0 0 270px;
+  height: 270px;
+  min-height: 270px;
+  overflow: visible;
+}
+
+.expanded-player.mini .expanded-video-side {
+  display: block;
+  width: 100%;
+  height: 270px;
+  padding: 0;
+}
+
+.expanded-player.mini .expanded-video-side .video-container {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  aspect-ratio: auto;
+  position: relative;
+}
+
+.expanded-player.mini .expanded-list-side { display: none; }
+
+.expanded-player.mini .expanded-video-side iframe,
+.expanded-player.mini .expanded-video-side #videoPlayer {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.player-mini-close {
+  display: none;
+  position: absolute;
+  right: 48px;
+  top: 5px;
+  width: 30px;
+  height: 30px;
+  background: rgba(255,255,255,.08);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+  place-items: center;
+}
+
+.expanded-player.mini .player-mini-close { display: grid; }
+.expanded-player.mini .expand-close { font-size: 1rem; }
+.expanded-player.mini .player-mini-close:hover { background: rgba(255,255,255,.15); }
+
+/* 작은 화면에서는 JS가 확장 모드만 쓰도록 처리하여 최소 플레이어 크기를 지킵니다. */
+
+
+/* ========== MMP AI 기능 추가 스타일 (테스트 통합) ========== */
+
+[hidden] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.primary-button {
+  transition: filter 0.2s, transform 0.1s, opacity 0.2s;
+}
+
+.primary-button:hover {
+  filter: brightness(1.08);
+}
+
+.primary-button:active {
+  transform: scale(0.98);
+}
+
+:is(.primary-button, .ghost-button, .chips button):focus-visible,
+.image-button:focus-within {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.chips button {
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.chips button:hover {
+  background: var(--accent-surface);
+}
+
+/* AI 요청 중에는 추천 버튼을 잠근다 */
+.is-loading :is(.primary-button, .chips button, #reloadButton) {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ---------- 검색 카드 ---------- */
+.image-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.image-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.search-card .image-button {
+  display: inline-flex;
+  margin: 0;
+}
+
+.image-button:hover {
+  border-color: var(--green);
+  color: var(--text);
+}
+
+.image-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--accent-border-subtle);
+  border-radius: 999px;
+  background: var(--accent-surface);
+  font-size: 0.85rem;
+  max-width: 260px;
+}
+
+.image-chip img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.image-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-chip button {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 2px 6px;
+}
+
+.image-chip button:hover {
+  color: var(--text);
+}
+
+.search-options {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 28px;
+  align-items: end;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.search-options .duration-settings {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.track-count input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 700;
+  outline: none;
+}
+
+.track-count input:focus {
+  border-color: var(--green);
+}
+
+/* ---------- AI 분석 / 수정 요청 ---------- */
+.ai-analysis {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--accent-border-subtle);
+  border-radius: 12px;
+  background: linear-gradient(120deg, rgba(37, 211, 102, 0.12), rgba(106, 169, 255, 0.08));
+  animation: rise 0.35s ease;
+}
+
+.ai-analysis p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.ai-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--green), var(--blue));
+  color: #061008;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.refine-panel {
+  margin-bottom: 28px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.refine-panel .chips {
+  margin-top: 12px;
+}
+
+/* ---------- 곡 카드 ---------- */
+.video-card:hover {
+  transform: translateY(-3px);
+}
+
+.video-reason {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--accent-border-subtle);
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* ---------- 로딩 ---------- */
+.loading-state {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.loading-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.loading-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: bounce 1s infinite ease-in-out;
+}
+
+.loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+.skeleton-card div,
+.skeleton-card span {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--panel) 25%, var(--panel-2) 50%, var(--panel) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+.skeleton-card div {
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.skeleton-card span {
+  height: 14px;
+  margin-bottom: 8px;
+}
+
+.skeleton-card span:last-child {
+  width: 50%;
+}
+
+/* ---------- 저장 다이얼로그 ---------- */
+.save-dialog {
+  width: min(420px, calc(100% - 32px));
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.save-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.save-dialog h3 {
+  margin: 6px 0 18px;
+  font-size: 1.4rem;
+}
+
+.save-dialog input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 700;
+  outline: none;
+}
+
+.save-dialog input:focus {
+  border-color: var(--green);
+}
+
+.save-description {
+  min-height: 1.5em;
+  margin: 12px 0 24px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.save-description.is-pending {
+  animation: pulse 1.2s infinite ease-in-out;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ---------- 토스트 ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 110px;
+  z-index: 2000;
+  padding: 12px 20px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.92rem;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  animation: toast 3s ease forwards;
+}
+
+@keyframes toast {
+  0% { opacity: 0; transform: translate(-50%, 10px); }
+  10%, 85% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 0); }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
+@keyframes pulse {
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .toast {
+    animation: none !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .search-options {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .ai-analysis {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .section-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+  }
+
+  .header-actions button {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 42px;
+    white-space: nowrap;
+  }
+
+  .volume-control {
+    display: none;
+  }
+}
+
+.image-notice { margin: 6px 0 4px; font-size: .72rem; color: var(--muted); }
+.recommendation-card .recommendation-content .ghost-button { margin-top: 8px; width: 100%; }

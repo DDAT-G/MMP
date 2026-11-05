@@ -4,6 +4,7 @@ console.log("내가 수정한 app.js 로드됨");
 const API_CONFIG = {
   useMockData: false,
   searchUrl: 'http://localhost:3000/playlist',
+  nameUrl: 'http://localhost:3000/playlist-name',
   mockUrl: './data/playlists.json',
 };
 
@@ -39,12 +40,18 @@ const state = {
   savedPlaylists: [],
   renameMode: false,
   editingPlaylistId: null,
+  analysis: null,
+  lastSongs: [],
+  loading: false,
+  lastRequest: null,
+  hiddenByDuration: 0,
 };
 
 const elements = {
   appShell: document.querySelector('.app-shell'),
   sidebarToggle: document.querySelector('#sidebarToggle'),
   randomButton: document.querySelector('#randomButton'),
+  weatherButton: document.querySelector('#weatherButton'),
   form: document.querySelector('#moodForm'),
   input: document.querySelector('#moodInput'),
   trackCountInput: document.querySelector('#trackCountInput'),
@@ -57,6 +64,7 @@ const elements = {
   reloadButton: document.querySelector('#reloadButton'),
   playSelectedButton: document.querySelector('#playSelectedButton'),
   mainSaveButton: document.querySelector('#mainSaveButton'),
+  youtubeExportButton: document.querySelector('#youtubeExportButton'),
   savePlaylistButton: document.querySelector('#savePlaylistButton'),
   savedPlaylistsContainer: document.querySelector('#savedPlaylistsContainer'),
   renameModeButton: document.querySelector('#renameModeButton'),
@@ -85,6 +93,20 @@ const elements = {
   expandedQueueList: document.querySelector('#expandedQueueList'),
   expandedPlaylistsList: document.querySelector('#expandedPlaylistsList'),
   sideTabButtons: document.querySelectorAll('.side-tab-button'),
+  imageInput: document.querySelector('#imageInput'),
+  imageChip: document.querySelector('#imageChip'),
+  imagePreview: document.querySelector('#imagePreview'),
+  imageName: document.querySelector('#imageName'),
+  imageClear: document.querySelector('#imageClear'),
+  aiAnalysis: document.querySelector('#aiAnalysis'),
+  aiAnalysisText: document.querySelector('#aiAnalysisText'),
+  refinePanel: document.querySelector('#refinePanel'),
+  refineForm: document.querySelector('#refineForm'),
+  refineInput: document.querySelector('#refineInput'),
+  refineChips: document.querySelectorAll('[data-refine]'),
+  saveDialog: document.querySelector('#saveDialog'),
+  saveNameInput: document.querySelector('#saveNameInput'),
+  saveDescription: document.querySelector('#saveDescription'),
 };
 
 const trackCache = new Map();
@@ -107,7 +129,8 @@ function getUniqueTracks(tracks) {
   );
 }
 
-async function fetchPlaylistData() {
+// Backend responds with AI reasoning and recommended songs; extra supports photo/refinement.
+async function fetchPlaylistData(extra = {}) {
   if (API_CONFIG.useMockData) {
     const response = await fetch(API_CONFIG.mockUrl);
     if (!response.ok) throw new Error('목 JSON 파일을 불러오지 못했습니다.');
@@ -115,57 +138,94 @@ async function fetchPlaylistData() {
   }
 
   const response = await fetch(API_CONFIG.searchUrl, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    input: state.activeMood,
-    count: state.trackCount
-  })
-});
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      input: state.activeMood,
+      count: Math.min(50, Math.max(1, parseInt(elements.trackCountInput.value, 10) || 8)),
+      minMinutes: parseInt(elements.minDurationInput.value, 10) || 1,
+      maxMinutes: parseInt(elements.maxDurationInput.value, 10) || 120,
+      ...extra,
+    }),
+  });
 
+  if (!response.ok) {
+    const details = await response.json().catch(() => ({}));
+    throw new Error(details.message || `백엔드 응답 오류 (${response.status})`);
+  }
 
-  if (!response.ok) throw new Error('백엔드 API 응답을 확인해 주세요.');
-
- const data = await response.json();
-
-return {
-  playlists: [
-    {
-      mood: data.userInput,
-      title: `${data.userInput} 추천 플레이리스트`,
-      tracks: data.videos.map((video) => ({
+  const data = await response.json();
+  const mood = data.mood || data.userInput || state.activeMood;
+  return {
+    analysis: data.analysis,
+    songs: data.playlist,
+    playlists: [{
+      mood,
+      title: `${mood} 추천 플레이리스트`,
+      tracks: (data.videos || []).map((video) => ({
         id: video.id,
         title: video.title,
         artist: video.artist,
         channelTitle: video.channelTitle,
         duration: video.duration,
         thumbnail: video.thumbnail,
-        mood: data.userInput,
+        mood,
+        reason: video.reason,
       })),
-    },
-  ],
-};
-
+    }],
+  };
 }
 
-async function loadData() {
+async function loadData(extra = {}) {
+  if (state.loading) return;
+  state.loading = true;
+  document.body.classList.add('is-loading');
   setLoadingView();
+  if (!extra.current) state.lastRequest = { input: state.activeMood, extra };
   try {
-    const data = await fetchPlaylistData();
+    const data = await fetchPlaylistData(extra);
     state.playlists = Array.isArray(data.playlists) ? data.playlists : [];
+    state.analysis = data.analysis || null;
+    state.lastSongs = data.songs || [];
+    state.activeMood = state.playlists[0]?.mood || state.activeMood;
   } catch (error) {
-    console.warn(error.message, '→ 목 데이터로 대체합니다.');
+    console.warn('AI 검색 실패:', error.message);
+    if (!API_CONFIG.useMockData) showToast(`AI 추천 실패: ${error.message}`);
+    state.analysis = null;
+    state.lastSongs = [];
     try {
       const mock = await fetch(API_CONFIG.mockUrl).then((r) => r.json());
       state.playlists = mock.playlists;
     } catch {
       state.playlists = fallbackData.playlists;
     }
+  } finally {
+    state.loading = false;
+    document.body.classList.remove('is-loading');
   }
   cacheTracks(state.playlists);
   applyMood(state.activeMood);
+  showAnalysis(state.analysis);
+  elements.refinePanel.hidden = state.lastSongs.length === 0;
+}
+
+function showAnalysis(text) {
+  elements.aiAnalysis.hidden = !text;
+  elements.aiAnalysisText.textContent = text || '';
+}
+
+function showToast(message) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.setAttribute('role', 'status');
+  toast.textContent = message;
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+function isInDurationRange(track) {
+  const seconds = isoToSeconds(track.duration);
+  return seconds === null || (seconds >= state.minDuration * 60 && seconds <= state.maxDuration * 60);
 }
 
 function applyMood(mood) {
@@ -187,7 +247,8 @@ function applyMood(mood) {
     return;
   }
 
-  state.activeTracks = matchedPlaylist.tracks;
+  state.activeTracks = matchedPlaylist.tracks.filter(isInDurationRange);
+  state.hiddenByDuration = matchedPlaylist.tracks.length - state.activeTracks.length;
   state.selectedTrackId = state.activeTracks[0]?.id || null;
   render();
 }
@@ -197,10 +258,15 @@ function render() {
   if (elements.mainSaveButton) {
     elements.mainSaveButton.disabled = state.selectedTrackIds.length === 0;
   }
+  if (elements.youtubeExportButton) {
+    elements.youtubeExportButton.disabled = state.selectedTrackIds.length === 0 || state.youtubeExporting;
+  }
   elements.playSelectedButton.querySelector('span').textContent = state.selectedTrackIds.length > 0 ? `▶ (${state.selectedTrackIds.length})` : '▶';
 
   if (state.activeTracks.length === 0) {
-    elements.trackList.innerHTML = '<div class="empty-state">표시할 음악 데이터가 없습니다.</div>';
+    elements.trackList.innerHTML = state.hiddenByDuration
+      ? `<div class="empty-state">영상 길이 조건에 맞는 곡이 없어요. (${state.hiddenByDuration}곡 숨겨짐)</div>`
+      : '<div class="empty-state">표시할 음악 데이터가 없습니다.</div>';
     updatePlayer(null);
     return;
   }
@@ -273,6 +339,7 @@ elements.volumeSlider.addEventListener('input', (e) => {
   const volume = e.target.value;
   updateVolumeIcon(volume);
   if (volume > 0) lastVolume = volume;
+  if (youtubeSession.ready) youtubeSession.player.setVolume(Number(volume));
 });
 
 elements.volumeButton.addEventListener('click', () => {
@@ -283,6 +350,7 @@ elements.volumeButton.addEventListener('click', () => {
     elements.volumeSlider.value = lastVolume;
   }
   updateVolumeIcon(elements.volumeSlider.value);
+  if (youtubeSession.ready) youtubeSession.player.setVolume(Number(elements.volumeSlider.value));
 });
 
 function updateVolumeIcon(volume) {
@@ -297,53 +365,73 @@ elements.playSelectedButton.addEventListener('click', () => {
   elements.playlistDrawer.classList.add('active');
 });
 
-const handleSavePlaylist = async () => {
+async function suggestPlaylistName(tracks) {
+  if (!tracks.length) return null;
+  try {
+    const response = await fetch(API_CONFIG.nameUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tracks: tracks.map(({ title, artist }) => ({ title, artist })) }),
+    });
+    return response.ok ? await response.json() : null;
+  } catch { return null; }
+}
+
+let saveRequestId = 0;
+const handleSavePlaylist = () => {
   if (state.selectedTrackIds.length === 0) return;
 
-  const name = prompt(
-    '리스트 이름을 입력하세요:',
-    `내 리스트 ${state.savedPlaylists.length + 1}`
-  );
+  const trackIds = [...state.selectedTrackIds];
+  const selectedTracks = trackIds.map(id => trackCache.get(id)).filter(Boolean);
+  const { saveDialog, saveNameInput, saveDescription } = elements;
+  const requestId = ++saveRequestId;
+  let edited = false;
+  let description = '';
 
-  if (!name) return;
+  saveNameInput.value = `내 리스트 ${state.savedPlaylists.length + 1}`;
+  saveNameInput.oninput = () => { edited = true; };
+  saveDescription.textContent = 'AI가 어울리는 이름을 짓는 중…';
+  saveDescription.classList.add('is-pending');
+  saveDialog.returnValue = '';
+  saveDialog.showModal();
 
-const selectedTracks = state.selectedTrackIds
-  .map(id => trackCache.get(id))
-  .filter(Boolean);
+  suggestPlaylistName(selectedTracks).then(ai => {
+    if (requestId !== saveRequestId) return;
+    if (ai?.title && !edited) saveNameInput.value = ai.title;
+    description = ai?.description || '';
+    saveDescription.textContent = description;
+    saveDescription.classList.remove('is-pending');
+  });
 
-const newPlaylist = {
-  id: Date.now().toString(),
-  name: name,
-  trackIds: [...state.selectedTrackIds],
-  tracks: selectedTracks
-};
+  saveDialog.onclose = async () => {
+    saveRequestId++;
+    const name = saveNameInput.value.trim();
+    if (saveDialog.returnValue !== 'save' || !name) return;
 
-  try {
-    const response = await fetch('http://localhost:3000/save-playlist', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(newPlaylist)
-    });
+    const newPlaylist = {
+      id: Date.now().toString(),
+      name, description,
+      trackIds,
+      tracks: selectedTracks,
+    };
 
-    if (!response.ok) {
-      throw new Error('플레이리스트 저장 실패');
+    try {
+      const response = await fetch('http://localhost:3000/save-playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPlaylist),
+      });
+      if (!response.ok) throw new Error('저장 API 호출 실패');
+      const data = await response.json();
+      state.savedPlaylists = data.playlists || [];
+      renderSavedPlaylists();
+      renderExpandedPlaylists();
+      showToast(`'${name}' 리스트를 저장했어요.`);
+    } catch (error) {
+      console.error('플레이리스트 저장 오류:', error);
+      alert('리스트 저장 중 오류가 발생했습니다.');
     }
-
-    const data = await response.json();
-
-    state.savedPlaylists = data.playlists;
-
-    renderSavedPlaylists();
-    renderExpandedPlaylists();
-
-    alert('리스트가 저장되었습니다.');
-
-  } catch (error) {
-    console.error('플레이리스트 저장 오류:', error);
-    alert('리스트 저장 중 오류가 발생했습니다.');
-  }
+  };
 };
 
 async function loadSavedPlaylists() {
@@ -406,6 +494,105 @@ async function updatePlaylist(playlist) {
 
     return false;
   }
+}
+
+// Export the selected tracks to a private playlist on the connected YouTube account.
+// This is deliberately separate from the existing MMP save/edit/playback flow.
+function showYoutubeExportResult(data) {
+  let panel = document.querySelector('#youtubeExportResult');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'youtubeExportResult';
+    panel.setAttribute('role', 'status');
+    panel.style.cssText = 'margin:12px 0;padding:14px 16px;border:1px solid var(--line,#444);border-radius:10px;';
+    const header = document.querySelector('.section-header');
+    if (header) header.insertAdjacentElement('afterend', panel);
+    else document.querySelector('.content').prepend(panel);
+  }
+  panel.replaceChildren();
+
+  const text = document.createElement('span');
+  text.textContent = data.failedVideoIds?.length
+    ? `YouTube 재생목록을 만들었어요. ${data.addedCount}곡 성공, ${data.failedVideoIds.length}곡 실패. `
+    : `YouTube 재생목록에 ${data.addedCount}곡을 추가했어요. `;
+  panel.append(text);
+
+  const link = document.createElement('a');
+  link.href = `https://www.youtube.com/playlist?list=${encodeURIComponent(data.playlistId)}`;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = 'YouTube에서 결과 보기';
+  link.style.marginLeft = '6px';
+  panel.append(link);
+}
+
+if (elements.youtubeExportButton) {
+  elements.youtubeExportButton.addEventListener('click', async () => {
+    if (state.youtubeExporting) return;
+
+    const tracks = getUniqueTracks(getTracksByIds(state.selectedTrackIds));
+    if (tracks.length === 0) {
+      showToast('먼저 내보낼 곡을 선택해 주세요.');
+      return;
+    }
+    // Current backend export route accepts 1..20 YouTube video IDs per request.
+    if (tracks.length > 20) {
+      showToast('현재 YouTube 내보내기는 한 번에 최대 20곡까지 가능해요.');
+      return;
+    }
+    if (tracks.some(track => !isYoutubeVideoId(track.id))) {
+      showToast('선택한 곡 중 YouTube 영상 ID가 없는 곡이 있어요.');
+      return;
+    }
+
+    state.youtubeExporting = true;
+    elements.youtubeExportButton.disabled = true;
+    const previousLabel = elements.youtubeExportButton.innerHTML;
+    elements.youtubeExportButton.textContent = 'YouTube 연결 확인 중…';
+
+    try {
+      const statusResponse = await fetch('http://localhost:3000/auth/google/status', {
+        credentials: 'include',
+      });
+      if (!statusResponse.ok) throw new Error('Google 연결 상태를 확인할 수 없어요.');
+      const { connected } = await statusResponse.json();
+      if (!connected) {
+        if (window.confirm('YouTube 연결이 필요해요. Google 계정을 연결할까요?')) {
+          window.location.assign('http://localhost:3000/auth/google');
+        }
+        return;
+      }
+
+      const title = (elements.playlistTitle.textContent || 'MMP 추천 플레이리스트').trim().slice(0, 150);
+      if (!window.confirm(`선택한 ${tracks.length}곡을 YouTube 비공개 재생목록 "${title}"(으)로 내보낼까요?`)) return;
+
+      elements.youtubeExportButton.textContent = 'YouTube로 내보내는 중…';
+      const response = await fetch('http://localhost:3000/youtube/export', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          videoIds: tracks.map(track => track.id),
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || `YouTube Export 오류 (${response.status})`);
+      }
+      if (!result.playlistId) throw new Error('생성된 재생목록 ID를 받지 못했어요.');
+
+      showYoutubeExportResult(result);
+      showToast(result.failedVideoIds?.length ? '일부 영상이 추가되지 않았어요. 결과를 확인해 주세요.' : 'YouTube로 내보내기 완료!');
+    } catch (error) {
+      console.error('YouTube Export 실패:', error);
+      showToast(`YouTube 내보내기 실패: ${error.message}`);
+    } finally {
+      state.youtubeExporting = false;
+      elements.youtubeExportButton.innerHTML = previousLabel;
+      elements.youtubeExportButton.disabled = state.selectedTrackIds.length === 0;
+    }
+  });
 }
 
 elements.savePlaylistButton.addEventListener('click', handleSavePlaylist);
@@ -670,7 +857,7 @@ function createTrackTemplate(track) {
     <article class="video-card${activeClass}" data-track-id="${escapeHtml(track.id)}">
       <div class="thumbnail-container">
         <img src="${track.thumbnail}" alt="${escapeHtml(track.title)} thumbnail" />
-        <span class="video-time">${escapeHtml(track.duration)}</span>
+        <span class="video-time">${escapeHtml(formatIsoDuration(track.duration))}</span>
         <div class="play-overlay">▶</div>
         <button class="select-button${selectedClass}" type="button" data-select-id="${escapeHtml(track.id)}" aria-label="선택하기">
           ${isSelected ? '✓' : '+'}
@@ -681,47 +868,306 @@ function createTrackTemplate(track) {
           <strong class="video-title">${escapeHtml(track.title)}</strong>
           <span class="video-meta">${escapeHtml(track.artist || track.channelTitle)}</span>
           <span class="video-mood">#${escapeHtml(track.mood)}</span>
+          ${track.reason ? `<p class="video-reason">${escapeHtml(track.reason)}</p>` : ''}
         </div>
       </div>
     </article>
   `;
 }
 
+// 단일 YouTube IFrame Player를 미니 창과 확장 화면에서 공유합니다.
+// 오디오 전용/숨겨진 플레이어가 되지 않도록 영상이 보이는 동안에만 재생합니다.
+const youtubeSession = {
+  player: null,
+  ready: false,
+  loadingApi: false,
+  currentVideoId: null,
+  pendingTrack: null,
+  playbackRequest: 0,
+  openAfter: 0,
+};
+
+// 한 iframe을 DOM에서 옮기거나 새로 생성하지 않고, 바깥 패널의 CSS만 전환합니다.
+const miniCloseButton = document.createElement('button');
+miniCloseButton.type = 'button';
+miniCloseButton.className = 'player-mini-close';
+miniCloseButton.textContent = '×';
+miniCloseButton.title = '재생 중지 및 미니 플레이어 닫기';
+miniCloseButton.setAttribute('aria-label', '미니 플레이어 닫기');
+elements.expandedPlayer.querySelector('.expanded-header').appendChild(miniCloseButton);
+
+function isVideoVisible() {
+  return elements.expandedPlayer.classList.contains('active') ||
+    elements.expandedPlayer.classList.contains('mini');
+}
+
+function canShowMiniPlayer() {
+  // 작은 화면에서는 영상의 최소 크기와 YouTube 컨트롤을 확보하기 위해 전체 화면을 유지합니다.
+  return window.innerWidth >= 520 && window.innerHeight >= 460;
+}
+
+function showExpandedVideo() {
+  elements.expandedPlayer.classList.remove('mini');
+  elements.expandedPlayer.classList.add('active');
+  elements.closeExpandedPlayer.textContent = '▼';
+  elements.closeExpandedPlayer.title = '미니 플레이어로 축소';
+}
+
+function showMiniVideo() {
+  if (!canShowMiniPlayer()) return false;
+  elements.expandedPlayer.classList.remove('active');
+  elements.expandedPlayer.classList.add('mini');
+  elements.closeExpandedPlayer.textContent = '▲';
+  elements.closeExpandedPlayer.title = '크게 보기';
+  return true;
+}
+
+const playbackControls = {
+  previous: document.querySelector('.control-buttons button[aria-label="previous"]'),
+  playPause: document.querySelector('.control-buttons button[aria-label="play"]'),
+  next: document.querySelector('.control-buttons button[aria-label="next"]'),
+  progress: document.querySelector('.progress-container .progress-bar'),
+  elapsed: document.querySelector('.progress-container span:first-child'),
+  duration: document.querySelector('.progress-container span:last-child'),
+};
+
+playbackControls.progress.style.cursor = 'pointer';
+playbackControls.progress.tabIndex = 0;
+playbackControls.progress.setAttribute('role', 'slider');
+playbackControls.progress.setAttribute('aria-label', '재생 위치');
+playbackControls.progress.setAttribute('aria-valuemin', '0');
+playbackControls.progress.setAttribute('aria-valuemax', '100');
+playbackControls.progress.setAttribute('aria-valuenow', '0');
+
+function isYoutubeVideoId(id) {
+  return /^[A-Za-z0-9_-]{11}$/.test(String(id || ''));
+}
+
+function selectedPlaybackTrack() {
+  return state.activeTracks.find(t => t.id === state.selectedTrackId) || state.activeTracks[0] || null;
+}
+
+function secondsToClock(seconds) {
+  const n = Math.max(0, Math.floor(Number(seconds) || 0));
+  const mins = Math.floor(n / 60);
+  const secs = String(n % 60).padStart(2, '0');
+  return `${mins}:${secs}`;
+}
+
+function setPlayPauseIcon(playing) {
+  playbackControls.playPause.textContent = playing ? 'Ⅱ' : '▶';
+  playbackControls.playPause.setAttribute('aria-label', playing ? 'pause' : 'play');
+  playbackControls.playPause.title = playing ? '일시정지' : '재생';
+}
+
+function updatePlaybackProgress(current = 0, duration = 0) {
+  const safeDuration = Math.max(0, Number(duration) || 0);
+  const safeCurrent = Math.max(0, Number(current) || 0);
+  const percentage = safeDuration > 0 ? Math.min(100, (safeCurrent / safeDuration) * 100) : 0;
+  playbackControls.elapsed.textContent = secondsToClock(safeCurrent);
+  playbackControls.duration.textContent = secondsToClock(safeDuration);
+  playbackControls.progress.querySelector('div').style.width = `${percentage}%`;
+  playbackControls.progress.setAttribute('aria-valuenow', String(Math.round(percentage)));
+  playbackControls.progress.setAttribute('aria-valuetext', `${secondsToClock(safeCurrent)} / ${secondsToClock(safeDuration)}`);
+}
+
+function refreshProgressFromYoutube() {
+  if (!youtubeSession.ready) return;
+  try {
+    updatePlaybackProgress(
+      youtubeSession.player.getCurrentTime(),
+      youtubeSession.player.getDuration()
+    );
+  } catch (error) {
+    // 영상 전환 직후에는 재생 위치를 읽지 못할 수 있습니다.
+  }
+}
+
+function ensureYoutubeIframeApi() {
+  if (youtubeSession.player) return;
+  if (window.YT && window.YT.Player) {
+    createYoutubePlayer();
+    return;
+  }
+  if (youtubeSession.loadingApi) return;
+  youtubeSession.loadingApi = true;
+  window.onYouTubeIframeAPIReady = createYoutubePlayer;
+  const script = document.createElement('script');
+  script.src = 'https://www.youtube.com/iframe_api';
+  script.onerror = () => {
+    youtubeSession.loadingApi = false;
+    alert('YouTube 플레이어 API를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.');
+  };
+  document.head.appendChild(script);
+}
+
+function createYoutubePlayer() {
+  if (youtubeSession.player) return;
+  youtubeSession.player = new YT.Player('videoPlayer', {
+    width: '100%',
+    height: '100%',
+    playerVars: { playsinline: 1, controls: 1, origin: window.location.origin },
+    events: {
+      onReady(event) {
+        youtubeSession.ready = true;
+        event.target.setVolume(Number(elements.volumeSlider.value));
+        flushPendingPlayback();
+      },
+      onStateChange(event) {
+        if (event.data === YT.PlayerState.PLAYING && !isVideoVisible()) {
+          event.target.pauseVideo();
+          return;
+        }
+        setPlayPauseIcon(event.data === YT.PlayerState.PLAYING);
+        if (event.data === YT.PlayerState.ENDED) {
+          moveTrack(1);
+        }
+        refreshProgressFromYoutube();
+      },
+      onError(event) {
+        youtubeSession.pendingTrack = null;
+        setPlayPauseIcon(false);
+        console.warn('YouTube 재생 오류 코드:', event.data);
+        alert('이 영상은 외부 사이트에서 재생할 수 없을 수 있습니다. 다른 곡을 선택해 주세요.');
+      },
+    },
+  });
+}
+
+function flushPendingPlayback() {
+  if (!youtubeSession.ready || !youtubeSession.pendingTrack) return;
+  const request = youtubeSession.playbackRequest;
+  const waitMs = Math.max(0, youtubeSession.openAfter - Date.now());
+  window.setTimeout(() => {
+    if (request !== youtubeSession.playbackRequest) return;
+    if (!isVideoVisible()) return;
+    const track = youtubeSession.pendingTrack;
+    if (!track || !isYoutubeVideoId(track.id)) return;
+    if (youtubeSession.currentVideoId === track.id) {
+      youtubeSession.player.playVideo();
+    } else {
+      youtubeSession.currentVideoId = track.id;
+      youtubeSession.player.loadVideoById(track.id);
+      updatePlaybackProgress(0, 0);
+    }
+    youtubeSession.pendingTrack = null;
+  }, waitMs);
+}
+
+function playYoutubeTrack(track, { expand = false } = {}) {
+  if (!track) return;
+  if (!isYoutubeVideoId(track.id)) {
+    alert('해당 곡에 유효한 YouTube 영상 ID가 없습니다. 다른 곡을 선택해 주세요.');
+    return;
+  }
+  const changed = state.selectedTrackId !== track.id;
+  state.selectedTrackId = track.id;
+  if (changed) render();
+  else updatePlayer(track);
+
+  // 일반 재생 버튼은 미니 창으로 시작하고, 확대 중이면 기존 확대 상태를 유지합니다.
+  if (expand || elements.expandedPlayer.classList.contains('active') || !canShowMiniPlayer()) {
+    showExpandedVideo();
+  } else {
+    showMiniVideo();
+  }
+  updateExpandedPlayerInfo(track);
+  youtubeSession.pendingTrack = track;
+  youtubeSession.playbackRequest++;
+  // 확대 애니메이션 중에는 시청 가능한 플레이어가 표시된 뒤 재생합니다.
+  youtubeSession.openAfter = Date.now() + (elements.expandedPlayer.classList.contains('active') ? 550 : 150);
+  setPlayPauseIcon(false);
+  ensureYoutubeIframeApi();
+  flushPendingPlayback();
+}
+
+function pauseYoutubePlayback() {
+  youtubeSession.pendingTrack = null;
+  youtubeSession.playbackRequest++;
+  if (youtubeSession.ready) youtubeSession.player.pauseVideo();
+  setPlayPauseIcon(false);
+}
+
+function moveTrack(direction) {
+  const tracks = state.activeTracks;
+  if (!tracks.length) return;
+  const currentIndex = tracks.findIndex(t => t.id === state.selectedTrackId);
+  const index = currentIndex < 0 ? 0 : (currentIndex + direction + tracks.length) % tracks.length;
+  playYoutubeTrack(tracks[index]);
+}
+
+function seekYoutubeToFraction(fraction) {
+  if (!youtubeSession.ready) return;
+  const duration = youtubeSession.player.getDuration();
+  if (!duration) return;
+  const clamped = Math.max(0, Math.min(1, fraction));
+  youtubeSession.player.seekTo(clamped * duration, true);
+  updatePlaybackProgress(clamped * duration, duration);
+}
+
+playbackControls.playPause.addEventListener('click', () => {
+  const track = selectedPlaybackTrack();
+  if (!track) return;
+  if (youtubeSession.ready &&
+      youtubeSession.player.getPlayerState() === YT.PlayerState.PLAYING &&
+      youtubeSession.currentVideoId === track.id) {
+    pauseYoutubePlayback();
+  } else {
+    playYoutubeTrack(track);
+  }
+});
+playbackControls.previous.addEventListener('click', () => moveTrack(-1));
+playbackControls.next.addEventListener('click', () => moveTrack(1));
+playbackControls.progress.addEventListener('click', event => {
+  const bounds = playbackControls.progress.getBoundingClientRect();
+  seekYoutubeToFraction((event.clientX - bounds.left) / bounds.width);
+});
+playbackControls.progress.addEventListener('keydown', event => {
+  if (!youtubeSession.ready) return;
+  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+  event.preventDefault();
+  const duration = youtubeSession.player.getDuration();
+  if (duration > 0) {
+    const offset = event.key === 'ArrowRight' ? 5 : -5;
+    youtubeSession.player.seekTo(Math.max(0, Math.min(duration, youtubeSession.player.getCurrentTime() + offset)), true);
+  }
+});
+setInterval(refreshProgressFromYoutube, 350);
+updatePlaybackProgress(0, 0);
+setPlayPauseIcon(false);
+
 function updatePlayer(track) {
   if (!track) {
     elements.playerCover.removeAttribute('src');
     elements.playerTitle.textContent = '곡을 선택하세요';
-    elements.playerArtist.textContent = '목 데이터로 재생 UI만 확인';
+    elements.playerArtist.textContent = '재생할 곡을 선택해 주세요';
     if (elements.watchVideoButton) elements.watchVideoButton.style.display = 'none';
     return;
   }
-
   elements.playerCover.src = track.thumbnail;
   elements.playerCover.alt = `${track.title} cover`;
   elements.playerTitle.textContent = track.title;
   elements.playerArtist.textContent = track.artist || track.channelTitle;
-
   if (elements.watchVideoButton) {
     elements.watchVideoButton.style.display = 'inline-flex';
     elements.watchVideoButton.onclick = () => openExpandedPlayer(track);
   }
-
-  if (elements.expandedPlayer.classList.contains('active')) {
+  if (isVideoVisible() && youtubeSession.currentVideoId === track.id) {
     updateExpandedPlayerInfo(track);
   }
 }
 
 function openExpandedPlayer(track) {
-  if (!track) return;
-  updateExpandedPlayerInfo(track);
-  elements.expandedPlayer.classList.add('active');
+  // 이미 열려 있는 영상이면 재생 시간이나 재생 상태를 바꾸지 않고 화면 크기만 변경합니다.
+  if (isVideoVisible() && youtubeSession.currentVideoId === track?.id) {
+    showExpandedVideo();
+    updateExpandedPlayerInfo(track);
+    return;
+  }
+  playYoutubeTrack(track, { expand: true });
 }
 
 function updateExpandedPlayerInfo(track) {
-  const embedUrl = `https://www.youtube.com/embed/${track.id}?autoplay=1`;
-  if (elements.videoPlayer.src !== embedUrl) {
-    elements.videoPlayer.src = embedUrl;
-  }
   elements.expandedTitle.textContent = track.title;
   elements.expandedArtist.textContent = track.artist || track.channelTitle;
   renderExpandedQueue();
@@ -754,7 +1200,7 @@ function renderExpandedPlaylists() {
           state.selectedTrackIds = [...playlist.trackIds];
           state.selectedTrackId = track.id;
           render();
-          updatePlayer(track);
+          playYoutubeTrack(track);
         }
       }
     });
@@ -780,9 +1226,29 @@ elements.sideTabButtons.forEach(button => {
 });
 
 function closeExpandedPlayer() {
-  elements.videoPlayer.src = '';
-  elements.expandedPlayer.classList.remove('active');
+  if (elements.expandedPlayer.classList.contains('active')) {
+    // 같은 YouTube iframe을 그대로 사용하므로 축소 시 영상이 처음부터 재시작되지 않습니다.
+    if (!showMiniVideo()) pauseYoutubePlayback();
+  } else if (elements.expandedPlayer.classList.contains('mini')) {
+    showExpandedVideo();
+  }
 }
+
+miniCloseButton.addEventListener('click', () => {
+  pauseYoutubePlayback();
+  elements.expandedPlayer.classList.remove('active', 'mini');
+});
+
+// 숨겨진 탭/최소화 창에서 오디오만 계속 재생하지 않도록 방지합니다.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && isVideoVisible()) pauseYoutubePlayback();
+});
+
+window.addEventListener('resize', () => {
+  if (elements.expandedPlayer.classList.contains('mini') && !canShowMiniPlayer()) {
+    showExpandedVideo();
+  }
+});
 
 function renderExpandedQueue() {
   const queueTracks = state.activeTracks;
@@ -802,7 +1268,7 @@ function renderExpandedQueue() {
       const track = state.activeTracks.find(t => t.id === trackId);
       state.selectedTrackId = track.id;
       render();
-      updatePlayer(track);
+      playYoutubeTrack(track);
     });
   });
 }
@@ -812,23 +1278,30 @@ if (elements.closeExpandedPlayer) {
 }
 
 function setLoadingView() {
-  elements.trackList.innerHTML = '<div class="empty-state">JSON 데이터를 불러오는 중입니다.</div>';
+  elements.trackList.innerHTML = `
+    <div class="loading-state" role="status">
+      <span class="loading-dots"><span></span><span></span><span></span></span>
+      AI가 어울리는 곡을 고르는 중이에요
+    </div>
+    ${'<div class="skeleton-card"><div></div><span></span><span></span></div>'.repeat(4)}
+  `;
+}
+
+function isoToSeconds(duration) {
+  if (!duration) return null;
+  const iso = String(duration).match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (iso) return Number(iso[1] || 0) * 3600 + Number(iso[2] || 0) * 60 + Number(iso[3] || 0);
+  const clock = String(duration).match(/^(\d+):(\d{2})$/);
+  return clock ? Number(clock[1]) * 60 + Number(clock[2]) : null;
 }
 
 function formatIsoDuration(duration) {
-  if (!duration) return '-';
-  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!match) return duration;
-
-  const hours = Number(match[1] || 0);
-  const minutes = Number(match[2] || 0);
-  const seconds = Number(match[3] || 0);
-  const secondText = String(seconds).padStart(2, '0');
-
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, '0')}:${secondText}`;
-  }
-  return `${minutes}:${secondText}`;
+  const total = isoToSeconds(duration);
+  if (total === null) return '-';
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = String(total % 60).padStart(2, '0');
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
 }
 
 function escapeHtml(value) {
@@ -876,23 +1349,126 @@ elements.randomButton.addEventListener('click', () => {
   }
 });
 
+// Time + weather recommendations. Location permission can be denied; falls back to time-only.
+function describeWeather(code) {
+  if (code === 0) return '맑음';
+  if (code <= 3) return '구름 조금';
+  if (code <= 48) return '안개';
+  if (code <= 57) return '이슬비';
+  if (code <= 67) return '비';
+  if (code <= 77) return '눈';
+  if (code <= 82) return '소나기';
+  if (code <= 86) return '눈보라';
+  return '천둥번개';
+}
+
+async function fetchWeather() {
+  try {
+    if (!navigator.geolocation) return null;
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000, maximumAge: 1800000 });
+    });
+    const { latitude, longitude } = position.coords;
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code`);
+    if (!response.ok) return null;
+    const { current } = await response.json();
+    if (!current) return null;
+    return `${describeWeather(current.weather_code)}, 기온 ${Math.round(current.temperature_2m)}°C`;
+  } catch { return null; }
+}
+
+elements.weatherButton.addEventListener('click', async () => {
+  if (state.loading) return;
+  const now = new Date();
+  const day = '일월화수목금토'[now.getDay()];
+  const time = `지금은 ${day}요일 ${now.getHours()}시 ${now.getMinutes()}분`;
+  elements.weatherButton.disabled = true;
+  const weather = await fetchWeather();
+  elements.weatherButton.disabled = false;
+  if (weather) showToast(`현재 날씨: ${weather}`);
+  state.activeMood = weather
+    ? `${time}, 날씨는 ${weather}. 이 시간대와 날씨에 어울리는 노래`
+    : `${time}. 이 시간대 분위기에 어울리는 노래`;
+  await loadData();
+});
+
+// Photos are resized to 768px before transmission to the AI backend.
+async function readImage(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, 768 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.8);
+  } finally { bitmap.close(); }
+}
+
+function clearImage() {
+  if (elements.imagePreview.src.startsWith('blob:')) URL.revokeObjectURL(elements.imagePreview.src);
+  elements.imageInput.value = '';
+  elements.imageChip.hidden = true;
+  elements.imagePreview.removeAttribute('src');
+}
+
+elements.imageInput.addEventListener('change', () => {
+  const file = elements.imageInput.files[0];
+  if (!file) return clearImage();
+  if (elements.imagePreview.src.startsWith('blob:')) URL.revokeObjectURL(elements.imagePreview.src);
+  elements.imagePreview.src = URL.createObjectURL(file);
+  elements.imageName.textContent = file.name;
+  elements.imageChip.hidden = false;
+});
+elements.imageClear.addEventListener('click', clearImage);
+
 elements.form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const file = elements.imageInput.files[0];
+  const input = elements.input.value.trim();
+  if (!input && !file) {
+    if (!state.lastRequest) return;
+    state.activeMood = state.lastRequest.input;
+    return loadData(state.lastRequest.extra);
+  }
 
-  console.log("검색 버튼 눌림");
+  let image;
+  if (file) {
+    try { image = await readImage(file); }
+    catch { showToast('사진을 읽을 수 없습니다. JPG/PNG로 시도해 주세요.'); return; }
+  }
+  state.activeMood = input || '사진 분위기';
+  await loadData(image ? { image } : {});
+  clearImage();
+});
 
-  state.activeMood = elements.input.value;
+async function refinePlaylist(request) {
+  if (!request || state.lastSongs.length === 0) return;
+  state.activeMood = request;
+  await loadData({ current: state.lastSongs });
+  elements.refineInput.value = '';
+}
 
-  await loadData();
+elements.refineForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  refinePlaylist(elements.refineInput.value.trim());
+});
+elements.refineChips.forEach(chip => {
+  chip.addEventListener('click', () => refinePlaylist(chip.dataset.refine));
+});
+
+// Duration slider also filters currently displayed playlist.
+[elements.minDurationInput, elements.maxDurationInput].forEach(input => {
+  input.addEventListener('change', () => applyMood(state.activeMood));
 });
 
 elements.chips.forEach((chip) => {
   chip.addEventListener('click', () => {
-    applyMood(chip.dataset.mood);
+    state.activeMood = chip.dataset.mood;
+    loadData();
   });
 });
 
 elements.reloadButton.addEventListener('click', loadData);
-
 loadData();
 loadSavedPlaylists();

@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>My Mood Playlist - Front Test</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 
@@ -21,7 +22,10 @@
         </div>
       </div>
       <nav class="nav-list" aria-label="main menu">
-        <div class="nav-section-title">내 리스트</div>
+        <div class="nav-section-header">
+          <span class="nav-section-title">내 리스트</span>
+          <button class="nav-section-action" id="renameModeButton" type="button" title="이름 수정" aria-label="리스트 이름 수정" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M14.5 5.5l4 4"/></svg></button>
+        </div>
         <div id="savedPlaylistsContainer" class="saved-playlists-list"></div>
       </nav>
       <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Toggle Sidebar">
@@ -41,6 +45,7 @@
           <div class="recommendation-content">
             <p>어떤 곡을 들을지 고민된다면?</p>
             <button class="primary-button" id="randomButton" type="button">🎲 랜덤으로 추천 받기</button>
+            <button class="ghost-button" id="weatherButton" type="button">🌤️ 지금 시간·날씨에 어울리는 곡</button>
           </div>
           <div class="chips" aria-label="quick mood filters">
             <button type="button" data-mood="집중">집중</button>
@@ -58,6 +63,18 @@
             <input id="moodInput" name="mood" type="search" placeholder="아티스트나 장르 등 키워드를 입력하세요." autocomplete="off" />
             <button class="primary-button" type="submit">검색</button>
           </div>
+          <div class="image-picker">
+            <label class="image-button">
+              <input class="visually-hidden" id="imageInput" type="file" accept="image/*" />
+              📷 사진 분위기로 추천
+            </label>
+            <span class="image-chip" id="imageChip" hidden>
+              <img id="imagePreview" alt="선택한 사진 미리보기" />
+              <span id="imageName"></span>
+              <button type="button" id="imageClear" aria-label="사진 지우기">✕</button>
+            </span>
+          </div>
+          <p class="image-notice">사진 추천을 사용하면 선택한 이미지가 AI 분석을 위해 전송돼요.</p>
           <div class="duration-settings">
             <div class="duration-header">
               <label>영상 길이 (분)</label>
@@ -76,22 +93,59 @@
         </div>
       </section>
 
+      <section class="playlist-editor" id="playlistEditor" hidden>
+        <div class="editor-header">
+          <div>
+            <span class="eyebrow">리스트 편집</span>
+            <h2 id="editorTitle">리스트</h2>
+          </div>
+          <div class="header-actions">
+            <button class="ghost-button" id="editorAddButton" type="button">＋ 선택한 곡 추가</button>
+            <button class="ghost-button" id="editorCloseButton" type="button">닫기</button>
+          </div>
+        </div>
+        <div class="editor-track-list" id="editorTrackList"></div>
+      </section>
+
       <section class="section-header">
         <div>
           <h2 id="playlistTitle">플레이리스트</h2>
           <span class="eyebrow">추천</span>
         </div>
         <div class="header-actions">
-          <button class="ghost-button" id="mainSaveButton" type="button" disabled>
-            <span>💾</span> 리스트 저장하기
-          </button>
-          <button class="play-selected-button" id="playSelectedButton" type="button" disabled>
-            <span>▶</span> 선택된 리스트 재생하기
-          </button>
+          
+<button class="ghost-button" id="mainSaveButton" type="button" disabled>
+  <span>💾</span> 리스트 저장하기
+</button>
+
+<button class="ghost-button" id="youtubeExportButton" type="button" disabled>
+  <span>▶</span> YouTube로 내보내기
+</button>
+
+<button class="play-selected-button" id="playSelectedButton" type="button" disabled>
+  <span>▶</span> 선택된 리스트 재생하기
+</button>
+
           <button class="ghost-button" id="reloadButton" type="button">다시 불러오기</button>
         </div>
       </section>
 
+      <div class="ai-analysis" id="aiAnalysis" hidden>
+        <span class="ai-badge">AI 분석</span>
+        <p id="aiAnalysisText"></p>
+      </div>
+      <div class="refine-panel" id="refinePanel" hidden>
+        <form class="search-row" id="refineForm">
+          <input id="refineInput" type="text" placeholder="AI에게 수정 요청하기 (예: 발라드는 빼줘, 2000년대 곡으로)" autocomplete="off" />
+          <button class="primary-button" type="submit">다시 추천</button>
+        </form>
+        <div class="chips">
+          <button type="button" data-refine="좀 더 신나는 곡으로 바꿔줘">⚡ 더 신나게</button>
+          <button type="button" data-refine="좀 더 잔잔한 곡으로 바꿔줘">🌙 더 잔잔하게</button>
+          <button type="button" data-refine="최근 2년 안에 나온 곡 위주로 바꿔줘">✨ 최신곡 위주</button>
+          <button type="button" data-refine="분위기는 유지하고 다른 가수들 곡으로 바꿔줘">🔀 다른 가수로</button>
+        </div>
+      </div>
       <section class="track-list" id="trackList" aria-live="polite"></section>
     </main>
   </div>
@@ -109,9 +163,9 @@
     <div class="expanded-body">
       <div class="expanded-video-side">
         <div class="video-container">
-          <iframe id="videoPlayer" src="" frameborder="0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen></iframe>
+          
+<div id="videoPlayer"></div>
+
         </div>
       </div>
       <div class="expanded-list-side">
@@ -172,6 +226,18 @@
     </section>
   </footer>
 
+  <dialog class="save-dialog" id="saveDialog">
+    <form method="dialog">
+      <span class="eyebrow">새 리스트</span>
+      <h3>리스트 저장</h3>
+      <input id="saveNameInput" type="text" maxlength="40" required aria-label="리스트 이름" />
+      <p class="save-description" id="saveDescription"></p>
+      <div class="dialog-actions">
+        <button class="ghost-button" type="submit" value="cancel" formnovalidate>취소</button>
+        <button class="primary-button" type="submit" value="save">저장</button>
+      </div>
+    </form>
+  </dialog>
   <script src="./app.js"></script>
 </body>
 
