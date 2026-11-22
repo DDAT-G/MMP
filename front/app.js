@@ -3,8 +3,8 @@ console.log("내가 수정한 app.js 로드됨");
 
 const API_CONFIG = {
   useMockData: false,
-  searchUrl: 'http://localhost:3000/playlist',
-  nameUrl: 'http://localhost:3000/playlist-name',
+  searchUrl: '/playlist',
+  nameUrl: '/playlist-name',
   mockUrl: './data/playlists.json',
 };
 
@@ -416,7 +416,7 @@ const handleSavePlaylist = () => {
     };
 
     try {
-      const response = await fetch('http://localhost:3000/save-playlist', {
+      const response = await fetch('/save-playlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newPlaylist),
@@ -436,7 +436,7 @@ const handleSavePlaylist = () => {
 
 async function loadSavedPlaylists() {
   try {
-    const response = await fetch('http://localhost:3000/playlists');
+    const response = await fetch('/playlists');
 
     if (!response.ok) {
       throw new Error('저장된 플레이리스트 불러오기 실패');
@@ -468,7 +468,7 @@ state.savedPlaylists.forEach(playlist => {
 async function updatePlaylist(playlist) {
   try {
     const response = await fetch(
-      `http://localhost:3000/playlist/${playlist.id}`,
+      `/playlist/${playlist.id}`,
       {
         method: 'PUT',
         headers: {
@@ -551,14 +551,14 @@ if (elements.youtubeExportButton) {
     elements.youtubeExportButton.textContent = 'YouTube 연결 확인 중…';
 
     try {
-      const statusResponse = await fetch('http://localhost:3000/auth/google/status', {
+      const statusResponse = await fetch('/auth/google/status', {
         credentials: 'include',
       });
       if (!statusResponse.ok) throw new Error('Google 연결 상태를 확인할 수 없어요.');
       const { connected } = await statusResponse.json();
       if (!connected) {
         if (window.confirm('YouTube 연결이 필요해요. Google 계정을 연결할까요?')) {
-          window.location.assign('http://localhost:3000/auth/google');
+          window.location.assign('/auth/google');
         }
         return;
       }
@@ -567,7 +567,7 @@ if (elements.youtubeExportButton) {
       if (!window.confirm(`선택한 ${tracks.length}곡을 YouTube 비공개 재생목록 "${title}"(으)로 내보낼까요?`)) return;
 
       elements.youtubeExportButton.textContent = 'YouTube로 내보내는 중…';
-      const response = await fetch('http://localhost:3000/youtube/export', {
+      const response = await fetch('/youtube/export', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -698,7 +698,7 @@ function renderSavedPlaylists() {
 
   try {
     const response = await fetch(
-      `http://localhost:3000/playlist/${playlist.id}`,
+      `/playlist/${playlist.id}`,
       {
         method: 'DELETE'
       }
