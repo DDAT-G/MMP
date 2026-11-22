@@ -1,0 +1,22 @@
+# 설치된 패키지
+node_modules/
+
+# API 키 및 환경설정
+.env
+.env.*
+!.env.example
+
+# SQLite 데이터베이스
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# 인증 정보
+token.json
+tokens.json
+credentials.json
+
+# 기타
+.DS_Store

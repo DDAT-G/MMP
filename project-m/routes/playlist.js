@@ -5,13 +5,66 @@ const axios = require('axios');
 const express = require('express');
 const OpenAI = require('openai');
 
+const db = require('../db');
+
+
 const router = express.Router();
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-let playlists = [];
+
+
+const insertPlaylist = db.prepare(`
+  INSERT INTO playlists (id, name, description)
+  VALUES (?, ?, ?)
+`);
+
+const insertTrack = db.prepare(`
+  INSERT INTO playlist_tracks
+  (playlist_id, video_id, title, artist, position, track_data)
+  VALUES (?, ?, ?, ?, ?, ?)
+`);
+
+
+function readPlaylistsFromDB() {
+  const rows = db.prepare(`
+    SELECT id, name, description
+    FROM playlists
+    ORDER BY created_at DESC
+  `).all();
+
+  const getTracks = db.prepare(`
+    SELECT video_id, title, artist, track_data
+    FROM playlist_tracks
+    WHERE playlist_id = ?
+    ORDER BY position ASC
+  `);
+
+  return rows.map(playlist => {
+    const tracks = getTracks.all(playlist.id).map(track => {
+      try {
+        return JSON.parse(track.track_data);
+      } catch {
+        return {
+          id: track.video_id,
+          title: track.title,
+          artist: track.artist
+        };
+      }
+    });
+
+    return {
+      ...playlist,
+      trackIds: tracks.map(track => track.id),
+      tracks
+    };
+  });
+}
+
+
+
 
 // 같은 곡을 다시 검색하지 않도록 캐시 (YouTube 검색은 1회 100 quota)
 // ponytail: 서버 재시작하면 비워짐, quota가 부족해지면 파일/DB로 옮기기
@@ -282,80 +335,275 @@ router.post('/save-playlist', (req, res) => {
     newPlaylist.id = Date.now().toString();
   }
 
-  playlists.push(newPlaylist);
+  
+try {
+  const saveToDB = db.transaction(() => {
+    insertPlaylist.run(
+      String(newPlaylist.id),
+      String(newPlaylist.name || '이름 없는 리스트'),
+      String(newPlaylist.description || '')
+    );
 
-  console.log('저장된 플레이리스트:', playlists);
+    const tracks = newPlaylist.tracks || [];
+
+    tracks.forEach((track, index) => {
+      insertTrack.run(
+        String(newPlaylist.id),
+        String(track.id),
+        String(track.title),
+        String(track.artist || ''),
+        index,
+        JSON.stringify(track)
+      );
+    });
+  });
+
+  saveToDB();
+
+} catch (error) {
+  console.error('SQLite 저장 오류:', error);
+
+  return res.status(500).json({
+    message: '플레이리스트 DB 저장 실패'
+  });
+}
+
+
 
   res.json({
     message: '플레이리스트 저장 완료!',
     playlist: newPlaylist,
-    playlists: playlists
+    playlists: readPlaylistsFromDB()
+
   });
 
 });
 
-// 조회
+ // 조회 - SQLite에서 저장된 플레이리스트 불러오기
 router.get('/playlists', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT id, name, description
+      FROM playlists
+      ORDER BY created_at DESC
+    `).all();
 
-  res.json({
-    playlists: playlists
-  });
+    const getTracks = db.prepare(`
+      SELECT video_id, title, artist, track_data
+      FROM playlist_tracks
+      WHERE playlist_id = ?
+      ORDER BY position ASC
+    `);
 
+    const savedPlaylists = rows.map(playlist => {
+      const tracks = getTracks.all(playlist.id).map(track => {
+        try {
+          return JSON.parse(track.track_data);
+        } catch {
+          return {
+            id: track.video_id,
+            title: track.title,
+            artist: track.artist
+          };
+        }
+      });
+
+      return {
+        ...playlist,
+        trackIds: tracks.map(track => track.id),
+        tracks
+      };
+    });
+
+    res.json({ playlists: savedPlaylists });
+
+  } catch (error) {
+    console.error('SQLite 조회 오류:', error);
+    res.status(500).json({
+      message: '플레이리스트 조회 실패'
+    });
+  }
 });
 
-// 삭제
+
+
+ // 삭제 - SQLite에서 플레이리스트 삭제
 router.delete('/playlist/:id', (req, res) => {
+  try {
+    const id = req.params.id;
 
-  const id = req.params.id;
+    // SQLite에서 삭제
+    const result = db.prepare(
+      'DELETE FROM playlists WHERE id = ?'
+    ).run(id);
 
-  const index = playlists.findIndex(
-    playlist => playlist.id === id
-  );
+    if (result.changes === 0) {
+      return res.status(404).json({
+        message: '해당 플레이리스트가 존재하지 않습니다.'
+      });
+    }
 
-  if (index === -1) {
-    return res.status(404).json({
-      message: '해당 플레이리스트가 존재하지 않습니다.'
+    // 삭제 후 남아 있는 플레이리스트 조회
+    const rows = db.prepare(
+      'SELECT id, name, description FROM playlists ORDER BY created_at DESC'
+    ).all();
+
+    const getTracks = db.prepare(`
+      SELECT video_id, title, artist, track_data
+      FROM playlist_tracks
+      WHERE playlist_id = ?
+      ORDER BY position ASC
+    `);
+
+    const savedPlaylists = rows.map(playlist => {
+      const tracks = getTracks.all(playlist.id).map(track => {
+        if (track.track_data) {
+          return JSON.parse(track.track_data);
+        }
+
+        return {
+          id: track.video_id,
+          title: track.title,
+          artist: track.artist
+        };
+      });
+
+      return {
+        ...playlist,
+        trackIds: tracks.map(track => track.id),
+        tracks
+      };
+    });
+
+    // 기존 메모리 배열도 정리
+
+    res.json({
+      message: '플레이리스트 삭제 완료!',
+      playlists: savedPlaylists
+    });
+
+  } catch (error) {
+    console.error('SQLite 삭제 오류:', error);
+
+    res.status(500).json({
+      message: '플레이리스트 삭제 실패'
     });
   }
-
-  playlists.splice(index, 1);
-
-  res.json({
-    message: '플레이리스트 삭제 완료!',
-    playlists: playlists
-  });
-
 });
 
-// 수정
+
+
+ // 수정 - SQLite에 플레이리스트 변경 사항 저장
 router.put('/playlist/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    const updatedData = req.body || {};
 
-  const id = req.params.id;
-  const updatedData = req.body;
+    // 수정할 플레이리스트가 존재하는지 확인
+    const existing = db.prepare(
+      'SELECT * FROM playlists WHERE id = ?'
+    ).get(id);
 
-  const index = playlists.findIndex(
-    playlist => playlist.id === id
-  );
+    if (!existing) {
+      return res.status(404).json({
+        message: '해당 플레이리스트가 존재하지 않습니다.'
+      });
+    }
 
-  if (index === -1) {
-    return res.status(404).json({
-      message: '해당 플레이리스트가 존재하지 않습니다.'
+    if (!Array.isArray(updatedData.tracks)) {
+      return res.status(400).json({
+        message: '음악 목록이 올바르지 않습니다.'
+      });
+    }
+
+    const tracks = updatedData.tracks;
+
+    if (tracks.some(track => !track || !track.id || !track.title)) {
+      return res.status(400).json({
+        message: '음악 정보가 올바르지 않습니다.'
+      });
+    }
+
+    const name = String(updatedData.name || existing.name);
+    const description = String(
+      updatedData.description ?? existing.description ?? ''
+    );
+
+    // 이름 수정 + 기존 곡 교체를 하나의 작업으로 처리
+    const updateDB = db.transaction(() => {
+      db.prepare(`
+        UPDATE playlists
+        SET name = ?, description = ?
+        WHERE id = ?
+      `).run(name, description, id);
+
+      db.prepare(
+        'DELETE FROM playlist_tracks WHERE playlist_id = ?'
+      ).run(id);
+
+      tracks.forEach((track, index) => {
+        insertTrack.run(
+          id,
+          String(track.id),
+          String(track.title),
+          String(track.artist || ''),
+          index,
+          JSON.stringify(track)
+        );
+      });
+    });
+
+    updateDB();
+
+    // SQLite에서 최신 목록 다시 조회
+    const rows = db.prepare(`
+      SELECT id, name, description
+      FROM playlists
+      ORDER BY created_at DESC
+    `).all();
+
+    const getTracks = db.prepare(`
+      SELECT video_id, title, artist, track_data
+      FROM playlist_tracks
+      WHERE playlist_id = ?
+      ORDER BY position ASC
+    `);
+
+    const savedPlaylists = rows.map(playlist => {
+      const savedTracks = getTracks.all(playlist.id).map(track => {
+        try {
+          return JSON.parse(track.track_data);
+        } catch {
+          return {
+            id: track.video_id,
+            title: track.title,
+            artist: track.artist
+          };
+        }
+      });
+
+      return {
+        ...playlist,
+        trackIds: savedTracks.map(track => track.id),
+        tracks: savedTracks
+      };
+    });
+
+    res.json({
+      message: '플레이리스트 수정 완료!',
+      playlist: savedPlaylists.find(p => p.id === id),
+      playlists: savedPlaylists
+    });
+
+  } catch (error) {
+    console.error('SQLite 수정 오류:', error);
+
+    res.status(500).json({
+      message: '플레이리스트 수정 실패'
     });
   }
-
-  // 기존 ID는 유지하면서 수정된 내용 반영
-  playlists[index] = {
-    ...updatedData,
-    id: id
-  };
-
-  res.json({
-    message: '플레이리스트 수정 완료!',
-    playlist: playlists[index],
-    playlists: playlists
-  });
-
 });
+
 
 module.exports = router;
 module.exports.scoreVideo = scoreVideo;
