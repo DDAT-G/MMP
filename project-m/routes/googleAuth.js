@@ -68,7 +68,7 @@ router.get('/google/callback', async (req, res) => {
         return res.status(500).send('인증 정보 저장 실패');
       }
 
-      res.redirect('http://localhost:8080/?youtube_connected=1');
+      res.redirect('/?youtube_connected=1');
     });
   } catch (err) {
     console.error('Google OAuth 인증 실패:', err.message);
