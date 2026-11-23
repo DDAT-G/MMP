@@ -16,6 +16,13 @@ const isProduction = process.env.NODE_ENV === 'production' ||
 
 app.set('trust proxy', 1);
 
+/* Public readiness check for the MMP-Website loading screen.
+   Only the official GitHub Pages origin may read the result. */
+app.get('/health', cors({ origin: 'https://ddat-g.github.io' }), (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ status: 'ok' });
+});
+
 app.use(cors({
   origin: ['http://localhost:8080', 'http://127.0.0.1:8080'],
   credentials: true
